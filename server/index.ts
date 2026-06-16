@@ -600,6 +600,15 @@ app.options("*", (c) => {
   return c.text("ok", 200, corsHeaders);
 });
 
+// Key-only server: do NOT advertise OAuth. Return 404 on the OAuth
+// discovery paths so clients (Claude Desktop, mcp-remote, Cowork) skip the
+// OAuth handshake and fall back to the static x-brain-key header / ?key=.
+// Without this, the catch-all below answered these with an HTTP 200 error
+// envelope, which clients read as "OAuth exists" and then hung on discovery.
+app.all("/.well-known/*", (c) => {
+  return c.json({ error: "Not Found" }, 404, corsHeaders);
+});
+
 app.all("*", async (c) => {
   // Accept access key via header OR URL query parameter
   const provided = c.req.header("x-brain-key") || new URL(c.req.url).searchParams.get("key");
