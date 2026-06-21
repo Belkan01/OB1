@@ -252,11 +252,15 @@ function buildServer(): McpServer {
             i: number
           ) => {
             const m = t.metadata || {};
+            const callDate = typeof m.date === "string" && m.date ? m.date : null;
             const parts = [
               `--- Result ${i + 1} (${(t.similarity * 100).toFixed(1)}% match) ---`,
-              `Captured: ${new Date(t.created_at).toLocaleDateString()}`,
-              `Type: ${m.type || "unknown"}`,
             ];
+            if (callDate) parts.push(`Date: ${callDate}`);
+            const sc = (m.source_call || {}) as Record<string, unknown>;
+            if (typeof sc.title === "string" && sc.title) parts.push(`Call: ${sc.title}`);
+            parts.push(`Captured: ${new Date(t.created_at).toLocaleDateString()}`);
+            parts.push(`Type: ${m.type || "unknown"}`);
             if (Array.isArray(m.topics) && m.topics.length)
               parts.push(`Topics: ${(m.topics as string[]).join(", ")}`);
             if (Array.isArray(m.people) && m.people.length)
@@ -340,7 +344,11 @@ function buildServer(): McpServer {
           ) => {
             const m = t.metadata || {};
             const tags = Array.isArray(m.topics) ? (m.topics as string[]).join(", ") : "";
-            return `${i + 1}. [${new Date(t.created_at).toLocaleDateString()}] (${m.type || "??"}${tags ? " - " + tags : ""})\n   ${t.content}`;
+            const callDate = typeof m.date === "string" && m.date ? m.date : null;
+            const dateStr = callDate
+              ? `${callDate}`
+              : new Date(t.created_at).toLocaleDateString();
+            return `${i + 1}. [${dateStr}] (${m.type || "??"}${tags ? " - " + tags : ""})\n   ${t.content}`;
           }
         );
 
