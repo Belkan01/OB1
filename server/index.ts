@@ -256,7 +256,14 @@ function buildServer(): McpServer {
             const parts = [
               `--- Result ${i + 1} (${(t.similarity * 100).toFixed(1)}% match) ---`,
             ];
-            if (callDate) parts.push(`Date: ${callDate}`);
+            if (callDate) {
+              const conf = m.date_confidence === "approximate" ? " (approx)" : "";
+              parts.push(`Date: ${callDate}${conf}`);
+            }
+            if (typeof m.note_source === "string" && m.note_source)
+              parts.push(`Source: ${m.note_source}`);
+            if (typeof m.counterparty === "string" && m.counterparty)
+              parts.push(`With: ${m.counterparty}`);
             const sc = (m.source_call || {}) as Record<string, unknown>;
             if (typeof sc.title === "string" && sc.title) parts.push(`Call: ${sc.title}`);
             parts.push(`Captured: ${new Date(t.created_at).toLocaleDateString()}`);
@@ -345,10 +352,15 @@ function buildServer(): McpServer {
             const m = t.metadata || {};
             const tags = Array.isArray(m.topics) ? (m.topics as string[]).join(", ") : "";
             const callDate = typeof m.date === "string" && m.date ? m.date : null;
+            const approx = callDate && m.date_confidence === "approximate" ? "~" : "";
             const dateStr = callDate
-              ? `${callDate}`
+              ? `${approx}${callDate}`
               : new Date(t.created_at).toLocaleDateString();
-            return `${i + 1}. [${dateStr}] (${m.type || "??"}${tags ? " - " + tags : ""})\n   ${t.content}`;
+            const prov: string[] = [];
+            if (typeof m.note_source === "string" && m.note_source) prov.push(m.note_source);
+            if (typeof m.counterparty === "string" && m.counterparty) prov.push(`with ${m.counterparty}`);
+            const provStr = prov.length ? ` · ${prov.join(" · ")}` : "";
+            return `${i + 1}. [${dateStr}] (${m.type || "??"}${tags ? " - " + tags : ""}${provStr})\n   ${t.content}`;
           }
         );
 
