@@ -455,6 +455,87 @@ function buildServer(): McpServer {
     }
   );
 
+  server.registerTool(
+    "list_calls",
+    {
+      title: "List Distinct Calls",
+      description:
+        "List DISTINCT calls/meetings (not individual notes), each with its date, title, who it was with (counterparty), and note count. Use this for questions like 'what calls happened with VidSummit', 'list our VC calls', 'how many times did we meet X'. Aggregates across the whole brain (no note cap), so it gives the complete set. Optional filters: with (counterparty org, e.g. 'VidSummit'), note_source (internal-team-call | external-call | manual-note), type (call_type: vc|team|advisor|design_partner|event_organizer|partner), since (YYYY-MM-DD).",
+      annotations: { readOnlyHint: true },
+      inputSchema: {
+        with: z.string().optional().describe("Filter to calls WITH this counterparty org (e.g. 'VidSummit')"),
+        note_source: z.string().optional().describe("internal-team-call | external-call | manual-note"),
+        type: z.string().optional().describe("call_type: vc | team | advisor | design_partner | event_organizer | partner"),
+        since: z.string().optional().describe("Only calls on/after this date YYYY-MM-DD"),
+      },
+    },
+    async ({ with: withParty, note_source, type, since }) => {
+      try {
+        // Page through ALL rows — PostgREST caps a single select at ~1000, which would
+        // make this tool miss most calls. Fetch in pages of 1000 until exhausted.
+        const data: { metadata: Record<string, unknown> }[] = [];
+        const PAGE = 1000;
+        for (let from = 0; ; from += PAGE) {
+          const { data: pg, error } = await supabase
+            .from("thoughts")
+            .select("metadata")
+            .order("created_at", { ascending: false })
+            .range(from, from + PAGE - 1);
+          if (error) {
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }], isError: true };
+          }
+          if (!pg || !pg.length) break;
+          data.push(...pg);
+          if (pg.length < PAGE) break;
+        }
+        // group by call (source_call.drive_id, else title+date)
+        const calls: Record<string, {
+          date: string | null; title: string; counterparty: string | null;
+          note_source: string | null; call_type: string | null;
+          date_confidence: string | null; n: number;
+        }> = {};
+        for (const r of data || []) {
+          const m = (r.metadata || {}) as Record<string, unknown>;
+          const sc = (m.source_call || {}) as Record<string, unknown>;
+          const cp = (m.counterparty as string) || null;
+          const ns = (m.note_source as string) || null;
+          const ct = (m.call_type as string) || null;
+          const date = (m.date as string) || null;
+          if (withParty && cp !== withParty) continue;
+          if (note_source && ns !== note_source) continue;
+          if (type && ct !== type) continue;
+          if (since && (!date || date < since)) continue;
+          const key = (sc.drive_id as string) || `${sc.title || "?"}|${date || "?"}`;
+          if (!calls[key]) {
+            calls[key] = {
+              date, title: (sc.title as string) || "(untitled)", counterparty: cp,
+              note_source: ns, call_type: ct, date_confidence: (m.date_confidence as string) || null, n: 0,
+            };
+          }
+          calls[key].n++;
+        }
+        const list = Object.values(calls).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+        if (!list.length) {
+          return { content: [{ type: "text" as const, text: "No calls found for that filter." }] };
+        }
+        const header = `${list.length} distinct call(s)` +
+          (withParty ? ` with ${withParty}` : "") +
+          (type ? ` · type=${type}` : "") +
+          (note_source ? ` · ${note_source}` : "") +
+          (since ? ` · since ${since}` : "");
+        const lines = list.map((c) => {
+          const approx = c.date && c.date_confidence === "approximate" ? "~" : "";
+          const meta = [c.note_source, c.counterparty ? `with ${c.counterparty}` : null]
+            .filter(Boolean).join(" · ");
+          return `  ${approx}${c.date || "(no date)"}  ${c.title}${meta ? `  [${meta}]` : ""}  (${c.n} notes)`;
+        });
+        return { content: [{ type: "text" as const, text: `${header}\n${lines.join("\n")}` }] };
+      } catch (err: unknown) {
+        return { content: [{ type: "text" as const, text: `Error: ${(err as Error).message}` }], isError: true };
+      }
+    }
+  );
+
   // Tool 4: Capture Thought
   server.registerTool(
     "capture_thought",
